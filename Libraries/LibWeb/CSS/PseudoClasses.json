@@ -41,6 +41,9 @@
   "focus-within": {
     "argument": ""
   },
+  "fullscreen": {
+    "argument": ""
+  },
   "has": {
     "argument": "<relative-selector-list>"
   },
