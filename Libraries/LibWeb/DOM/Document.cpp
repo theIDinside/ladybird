@@ -576,6 +576,10 @@ void Document::visit_edges(Cell::Visitor& visitor)
         visitor.visit(event.target);
     }
 
+    for (auto& event : m_pending_fullscreen_events) {
+        visitor.visit(event.m_element);
+    }
+
     visitor.visit(m_adopted_style_sheets);
 
     visitor.visit(m_shadow_roots);
@@ -6105,6 +6109,39 @@ void Document::add_render_blocking_element(GC::Ref<Element> element)
 void Document::remove_render_blocking_element(GC::Ref<Element> element)
 {
     m_render_blocking_elements.remove(element);
+}
+
+// https://fullscreen.spec.whatwg.org/#run-the-fullscreen-steps
+void Document::run_fullscreen_steps()
+{
+    // 1. Let pendingEvents be document’s list of pending fullscreen events.
+    // 2. Empty document’s list of pending fullscreen events.
+    Vector<PendingFullscreenEvent> pending_events;
+    std::swap(m_pending_fullscreen_events, pending_events);
+    // 3. For each (type, element) in pendingEvents:
+    for (auto const& [type, element] : pending_events) {
+        // 4.
+        EventTarget* target = nullptr;
+        if (element->is_connected() && &element->document() == this) {
+            target = element;
+        } else {
+            target = this;
+        }
+        // 5.
+        switch (type) {
+        case PendingFullscreenEvent::Type::Change:
+            target->dispatch_event(Event::create(realm(), HTML::EventNames::fullscreenchange, EventInit { .bubbles = true, .composed = true }));
+            break;
+        case PendingFullscreenEvent::Type::Error:
+            target->dispatch_event(Event::create(realm(), HTML::EventNames::fullscreenerror, EventInit { .bubbles = true, .composed = true }));
+            break;
+        }
+    }
+}
+
+void Document::append_pending_fullscreen_change(PendingFullscreenEvent::Type type, GC::Ref<Element> element)
+{
+    m_pending_fullscreen_events.append(PendingFullscreenEvent { type, element });
 }
 
 // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots
