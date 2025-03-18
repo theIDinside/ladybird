@@ -33,6 +33,16 @@ dictionary CheckVisibilityOptions {
     boolean visibilityProperty = false;
 };
 
+enum FullscreenNavigationUI {
+  "auto",
+  "show",
+  "hide"
+};
+
+dictionary FullscreenOptions {
+  FullscreenNavigationUI navigationUI = "auto";
+};
+
 // https://dom.spec.whatwg.org/#element
 [Exposed=Window]
 interface Element : Node {
@@ -120,6 +130,9 @@ interface Element : Node {
     // FIXME: [CEReactions] undefined insertAdjacentHTML(DOMString position, (TrustedHTML or DOMString) string);
     [CEReactions] undefined insertAdjacentHTML(DOMString position, DOMString text);
 
+    // partial interface for https://fullscreen.spec.whatwg.org/#api
+    attribute EventHandler onfullscreenchange;
+    attribute EventHandler onfullscreenerror;
 };
 
 dictionary GetHTMLOptions {
