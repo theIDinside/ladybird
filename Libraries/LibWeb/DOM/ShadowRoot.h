@@ -64,6 +64,8 @@ public:
 
     virtual void finalize() override;
 
+    GC::Ptr<Element> fullscreen_element() const;
+
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -92,6 +94,7 @@ private:
 
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
+    GC::Ptr<Element> m_fullscreen_element { nullptr };
 };
 
 template<>
