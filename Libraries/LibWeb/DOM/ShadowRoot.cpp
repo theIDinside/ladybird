@@ -31,6 +31,12 @@ void ShadowRoot::finalize()
     document().unregister_shadow_root({}, *this);
 }
 
+GC::Ptr<Element> ShadowRoot::fullscreen_element() const
+{
+    /// FIXME: Should return a fullscreen element.
+    return nullptr;
+}
+
 void ShadowRoot::initialize(JS::Realm& realm)
 {
     Base::initialize(realm);

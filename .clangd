@@ -1,6 +1,7 @@
 CompileFlags:
-  CompilationDatabase: Build/release
-
+  CompilationDatabase: Build/debug
+  Add: [-Wno-unqualified-std-cast-call]
+  
 Diagnostics:
   UnusedIncludes: None
   MissingIncludes: None

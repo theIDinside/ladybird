@@ -568,6 +568,7 @@ void WebContentClient::did_request_minimize_window(u64 page_id)
 
 void WebContentClient::did_request_fullscreen_window(u64 page_id)
 {
+    dbgln("WebContentClient::did_request_fullscreen_window(u64 page_id={})", page_id);
     if (auto view = view_for_page_id(page_id); view.has_value()) {
         if (view->on_fullscreen_window)
             view->on_fullscreen_window();

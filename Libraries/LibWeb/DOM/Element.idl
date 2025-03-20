@@ -131,6 +131,7 @@ interface Element : Node {
     [CEReactions] undefined insertAdjacentHTML(DOMString position, DOMString text);
 
     // partial interface for https://fullscreen.spec.whatwg.org/#api
+    Promise<undefined> requestFullscreen();
     attribute EventHandler onfullscreenchange;
     attribute EventHandler onfullscreenerror;
 };

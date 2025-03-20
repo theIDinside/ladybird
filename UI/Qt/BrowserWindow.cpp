@@ -1169,6 +1169,10 @@ bool BrowserWindow::event(QEvent* event)
     if (event->type() == QEvent::WindowActivate)
         static_cast<Ladybird::Application*>(QApplication::instance())->set_active_window(*this);
 
+    if (event->type() == QEvent::WindowStateChange) {
+      dbgln("BrowserWindow::event(QEvent::WindowStateChange={})", (u64)windowState());
+    }
+
     return QMainWindow::event(event);
 }
 

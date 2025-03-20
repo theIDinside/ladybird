@@ -63,7 +63,7 @@ public:
     WebIDL::ExceptionOr<Vector<GC::Ref<Animations::Animation>>> get_animations();
 
     virtual void finalize() override;
-
+    GC::Ptr<Element> fullscreen_element() const;
 protected:
     virtual void visit_edges(Cell::Visitor&) override;
 
@@ -91,6 +91,7 @@ private:
     bool m_serializable { false };
 
     GC::Ptr<CSS::StyleSheetList> m_style_sheets;
+    GC::Ptr<Element> m_fullscreen_element { nullptr };
     mutable GC::Ptr<WebIDL::ObservableArray> m_adopted_style_sheets;
 };
 

@@ -9,6 +9,8 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "AK/Assertions.h"
+#include "LibWeb/HTML/Scripting/TemporaryExecutionContext.h"
 #include <AK/CharacterTypes.h>
 #include <AK/Debug.h>
 #include <AK/GenericLexer.h>
@@ -21,6 +23,7 @@
 #include <LibJS/Runtime/Array.h>
 #include <LibJS/Runtime/FunctionObject.h>
 #include <LibJS/Runtime/NativeFunction.h>
+#include <LibJS/Runtime/Value.h>
 #include <LibURL/Origin.h>
 #include <LibURL/Parser.h>
 #include <LibUnicode/Segmenter.h>
@@ -142,6 +145,7 @@
 #include <LibWeb/Page/Page.h>
 #include <LibWeb/Painting/ViewportPaintable.h>
 #include <LibWeb/PermissionsPolicy/AutoplayAllowlist.h>
+#include <LibWeb/Platform/EventLoopPlugin.h>
 #include <LibWeb/ResizeObserver/ResizeObserver.h>
 #include <LibWeb/ResizeObserver/ResizeObserverEntry.h>
 #include <LibWeb/SVG/SVGDecodedImageData.h>
@@ -158,6 +162,7 @@
 #include <LibWeb/WebIDL/AbstractOperations.h>
 #include <LibWeb/WebIDL/DOMException.h>
 #include <LibWeb/WebIDL/ExceptionOr.h>
+#include <LibWeb/WebIDL/Promise.h>
 
 namespace Web::DOM {
 
@@ -6163,6 +6168,212 @@ WebIDL::CallbackType* Document::onfullscreenerror()
 void Document::set_onfullscreenerror(WebIDL::CallbackType* value)
 {
     set_event_handler_attribute(HTML::EventNames::fullscreenerror, value);
+}
+
+// https://fullscreen.spec.whatwg.org/#fullscreen-an-element
+void Document::fullscreen_element_within_doc(GC::Ref<Element> element)
+{
+    using HTML::HTMLElement;
+    m_fullscreen_element = element;
+    const auto get_hide_until = [&](const auto& popover_list) {
+        return HTMLElement::topmost_popover_ancestor(element, popover_list, nullptr, HTML::IsPopover::No);
+    };
+
+    // 1. Let hideUntil be the result of running topmost popover ancestor given element, null, and false.
+    // 2. If hideUntil is null, then set hideUntil to element’s node document.
+    auto hide_until = get_hide_until(showing_hint_popover_list());
+    if (hide_until == nullptr) {
+        hide_until = get_hide_until(showing_auto_popover_list());
+    }
+
+    // 3. Run hide all popovers until given hideUntil, false, and true.
+    if(hide_until) {
+        HTMLElement::hide_all_popovers_until(hide_until, HTML::FocusPreviousElement::No, HTML::FireEvents::Yes);
+    } else {
+        HTMLElement::hide_all_popovers_until(element->owner_document(), HTML::FocusPreviousElement::No, HTML::FireEvents::Yes);
+    }
+
+    // 4. Set element’s fullscreen flag.
+    element->set_fullscreen_flag(true);
+    // 5. Remove from the top layer immediately given element.
+    remove_an_element_from_the_top_layer_immediately(element);
+    // 6. Add to the top layer given element.
+    add_an_element_to_the_top_layer(element);
+    element->invalidate_style(StyleInvalidationReason::Fullscreen);
+}
+
+GC::Ptr<Element> Document::fullscreen_element() const
+{
+    if (!m_fullscreen_element) {
+        return nullptr;
+    }
+    // 1. If this is a shadow root and its host is not connected, then return null.
+    // - We're not a shadow root
+    // 2. Let candidate be the result of retargeting fullscreen element against this.
+    auto* candidate = retarget(m_fullscreen_element.ptr(), const_cast<Document*>(this));
+    if (!candidate) {
+        return nullptr;
+    }
+    // 3. If candidate and this are in the same tree, then return candidate.
+    if (auto* retargeted_element = as<Element>(candidate); retargeted_element && &retargeted_element->root() == &root()) {
+        return retargeted_element;
+    }
+    // 4. Return null.
+    return nullptr;
+}
+
+GC::Ref<WebIDL::Promise> Document::exit_fullscreen() {
+    auto* realm = vm().current_realm();
+    auto* doc = this;
+    // 1. Let promise be a new promise.
+    auto promise = WebIDL::create_promise(*realm);
+    // 2. If doc is not fully active or doc’s fullscreen element is null, then reject promise with a TypeError exception and return promise.
+    if (!is_fully_active() || !fullscreen_element()) {
+        WebIDL::reject_promise(*realm, promise, JS::TypeError::create(*realm, "Document not fully active or no fullscreen element."sv));
+    }
+    // 3. Let resize be false.
+    bool resize = false;
+    // 4. Let docs be the result of collecting documents to unfullscreen given doc.
+    Vector<GC::Ptr<Document>> docs = collect_documents_to_unfullscreen();
+    // 5. Let topLevelDoc be doc’s node navigable’s top-level traversable’s active document.
+    auto top_level_doc = navigable()->top_level_traversable()->active_document();
+    // 6. If topLevelDoc is in docs, and it is a simple fullscreen document, then set doc to topLevelDoc and resize to true.
+    if (top_level_doc->is_simple_fullscreen_document() && docs.contains_slow(top_level_doc)) {
+        doc = top_level_doc;
+        resize = true;
+    }
+    // 7. If doc’s fullscreen element is not connected:
+    //    Append (fullscreenchange, doc’s fullscreen element) to doc’s list of pending fullscreen events.
+    //    Unfullscreen doc’s fullscreen element.
+    if (auto fullscreen_element = doc->fullscreen_element(); !fullscreen_element->is_connected()) {
+        doc->append_pending_fullscreen_change(PendingFullscreenEvent::Type::Change, *fullscreen_element);
+        doc->unfullscreen_element(*fullscreen_element);
+    }
+
+    // 8. Return promise, and run the remaining steps in parallel.
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm->heap(), [realm, resize, promise, doc = GC::Ptr<Document>{doc}]() {
+        HTML::TemporaryExecutionContext context(*realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+        // FIXME: 9. Run the fully unlock the screen orientation steps with doc.
+        // 10. If resize is true, resize doc’s viewport to its "normal" dimensions.
+        if (resize) {
+            dbgln(R"(resize doc's viewport to its "normal" dimensions.)");
+        }
+        // 11. If doc’s fullscreen element is null, then resolve promise with undefined and terminate these steps.
+        if (!doc->fullscreen_element()) {
+            WebIDL::resolve_promise(*realm, promise, JS::js_undefined());
+            return;
+        }
+        // 12. Let exitDocs be the result of collecting documents to unfullscreen given doc.
+        auto exit_docs = doc->collect_documents_to_unfullscreen();
+        // 13. Let descendantDocs be an ordered set consisting of doc’s descendant navigables' active documents whose fullscreen element is non-null, if any, in tree order.
+
+        Vector<GC::Ptr<Document>> descendant_docs;
+        for (auto& descendant : doc->descendant_navigables()) {
+            if (descendant->active_document()->fullscreen_element()) {
+                descendant_docs.append(descendant->active_document());
+            }
+        }
+
+        // 14. For each exitDoc in exitDocs:
+        //     Append (fullscreenchange, exitDoc’s fullscreen element) to exitDoc’s list of pending fullscreen events.
+        //     If resize is true, unfullscreen exitDoc.
+        //     Otherwise, unfullscreen exitDoc’s fullscreen element.
+        for (auto const& exit_doc : exit_docs) {
+            exit_doc->append_pending_fullscreen_change(PendingFullscreenEvent::Type::Change, *exit_doc->fullscreen_element());
+            if (resize) {
+                for (auto el : exit_doc->top_layer_elements()) {
+                    if (el->is_fullscreen_element()) {
+                        exit_doc->unfullscreen_element(el);
+                    }
+                }
+            } else {
+                exit_doc->unfullscreen_element(*exit_doc->fullscreen_element());
+            }
+        }
+        // 15. For each descendantDoc in descendantDocs:
+        //     Append (fullscreenchange, descendantDoc’s fullscreen element) to descendantDoc’s list of pending fullscreen events.
+        //     Unfullscreen descendantDoc.
+        for (auto& descendant_doc : descendant_docs) {
+            auto el = descendant_doc->fullscreen_element();
+            descendant_doc->append_pending_fullscreen_change(PendingFullscreenEvent::Type::Change, *el);
+            descendant_doc->unfullscreen_element(*el);
+        }
+        // NOTE: The order in which documents are unfullscreened is not observable, because run the fullscreen steps is invoked in tree order.
+        // 16. Resolve promise with undefined.
+        WebIDL::resolve_promise(*realm, promise, JS::js_undefined());
+    }));
+    return promise;
+}
+
+bool Document::fullscreen() const
+{
+    return m_fullscreen_element;
+}
+
+bool Document::fullscreen_enabled() const
+{
+    /// TODO: Possibly add scenarios where this can return false.
+    return true;
+}
+
+bool Document::is_simple_fullscreen_document() const
+{
+    u32 total = 0;
+    for (const auto& element : top_layer_elements()) {
+        total += element->is_fullscreen_element();
+        if (total > 1) {
+            return false;
+        }
+    }
+    return total == 1;
+}
+
+Vector<GC::Ptr<Document>> Document::collect_documents_to_unfullscreen() const
+{
+    // 1. Let docs be an ordered set consisting of doc.
+    Vector<GC::Ptr<Document>> docs;
+    docs.append(GC::Ptr { const_cast<Document*>(this) });
+    // 2. While true:
+    for (;;) {
+        //  1. Let lastDoc be docs’s last document.
+        auto last_doc = docs.last();
+        //  2. Assert: lastDoc’s fullscreen element is not null.
+        VERIFY(last_doc->fullscreen_element());
+        //  3. If lastDoc is not a simple fullscreen document, break.
+        if (!last_doc->is_simple_fullscreen_document()) {
+            break;
+        }
+        //  4. Let container be lastDoc’s node navigable’s container.
+        auto container = last_doc->navigable()->container();
+        //  5. If container is null, then break.
+        if (!container) {
+            break;
+        }
+        //  6. If container’s iframe fullscreen flag is set, break.
+        if (HTML::HTMLIFrameElement* iframe_element = as<HTML::HTMLIFrameElement>(container.ptr()); iframe_element) {
+            if (iframe_element->iframe_fullscreen_flag()) {
+                break;
+            }
+        }
+
+        //  7. Append container’s node document to docs.
+        docs.append(container->document());
+    }
+    // 3. Return docs.
+    return docs;
+}
+
+void Document::unfullscreen_element(GC::Ref<Element> element)
+{
+    // To unfullscreen an element, unset element’s fullscreen flag and iframe fullscreen flag (if any), and remove from the top layer immediately given element.
+    element->set_fullscreen_flag(false);
+    remove_an_element_from_the_top_layer_immediately(element);
+
+    HTML::HTMLIFrameElement* iframe_element = as_if<HTML::HTMLIFrameElement>(element.ptr());
+    if (iframe_element) {
+        iframe_element->set_iframe_fullscreen_flag(false);
+    }
+    element->invalidate_style(StyleInvalidationReason::Fullscreen);
 }
 
 // https://dom.spec.whatwg.org/#document-allow-declarative-shadow-roots

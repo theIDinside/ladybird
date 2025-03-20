@@ -158,6 +158,11 @@ interface Document : Node {
     attribute EventHandler onvisibilitychange;
 
     // https://fullscreen.spec.whatwg.org/#api
+    // FIXME: [LegacyLenientSetter]
+    readonly attribute boolean fullscreenEnabled;
+    // FIXME: [LegacyLenientSetter, Unscopable]
+    [Unscopable] readonly attribute boolean fullscreen; // historical
+    Promise<undefined> exitFullscreen();
     attribute EventHandler onfullscreenchange;
     attribute EventHandler onfullscreenerror;
 

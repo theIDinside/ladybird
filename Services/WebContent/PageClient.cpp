@@ -314,6 +314,7 @@ void PageClient::page_did_request_minimize_window()
 
 void PageClient::page_did_request_fullscreen_window()
 {
+    dbgln("PageClient::page_did_request_fullscreen_window(), m_id={}", m_id);
     client().async_did_request_fullscreen_window(m_id);
 }
 

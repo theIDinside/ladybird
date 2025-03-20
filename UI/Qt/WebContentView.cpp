@@ -757,6 +757,10 @@ bool WebContentView::event(QEvent* event)
         return true;
     }
 
+    if (event->type() == QEvent::WindowStateChange) {
+        dbgln("Window state change event");
+    }
+
     return QWidget::event(event);
 }
 

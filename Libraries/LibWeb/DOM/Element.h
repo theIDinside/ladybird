@@ -229,6 +229,9 @@ public:
 
     WebIDL::ExceptionOr<void> insert_adjacent_html(String const& position, String const&);
 
+    bool element_ready_check() const;
+    GC::Ref<WebIDL::Promise> request_fullscreen();
+
     GC::Ptr<WebIDL::CallbackType> onfullscreenchange();
     void set_onfullscreenchange(GC::Ptr<WebIDL::CallbackType>);
 
@@ -405,6 +408,9 @@ public:
     void set_rendered_in_top_layer(bool rendered_in_top_layer) { m_rendered_in_top_layer = rendered_in_top_layer; }
     bool rendered_in_top_layer() const { return m_rendered_in_top_layer; }
 
+    void set_fullscreen_flag(bool is_fullscreen) { m_fullscreen_flag = is_fullscreen; }
+    bool is_fullscreen_element() const { return m_fullscreen_flag; }
+
     bool has_non_empty_counters_set() const { return m_counters_set; }
     Optional<CSS::CountersSet const&> counters_set();
     CSS::CountersSet& ensure_counters_set();
@@ -557,6 +563,7 @@ private:
     bool m_affected_by_first_or_last_child_pseudo_class : 1 { false };
     bool m_affected_by_nth_child_pseudo_class : 1 { false };
     bool m_affected_by_has_pseudo_class_with_relative_selector_that_has_sibling_combinator : 1 { false };
+    bool m_fullscreen_flag : 1 { false };
 
     OwnPtr<CSS::CountersSet> m_counters_set;
 

@@ -5,6 +5,13 @@
  * SPDX-License-Identifier: BSD-2-Clause
  */
 
+#include "LibGC/Function.h"
+#include "LibJS/Runtime/Value.h"
+#include "LibWeb/HTML/EventNames.h"
+#include "LibWeb/HTML/HTMLIFrameElement.h"
+#include "LibWeb/HTML/Scripting/Environments.h"
+#include "LibWeb/Platform/EventLoopPlugin.h"
+#include "LibWeb/WebIDL/Promise.h"
 #include <AK/AnyOf.h>
 #include <AK/Debug.h>
 #include <AK/StringBuilder.h>
@@ -1878,6 +1885,148 @@ WebIDL::ExceptionOr<void> Element::insert_adjacent_html(String const& position, 
         parent()->insert_before(fragment, next_sibling());
     }
     return {};
+}
+
+enum class FullscreenErrorConditions {
+    Success = 0,
+    NotCompliantNamespace,
+    IsDialogElement,
+    ReadyCheckFailed,
+    FullscreenNotSupported,
+    NoTransientActivation,
+};
+
+static bool
+check_fullscreen_conditions(Element const& element)
+{
+    // This’s namespace is the HTML namespace or this is an SVG svg or MathML math element. [SVG] [MATHML]
+    if(!(element.is_html_element() || element.is_svg_element())) {
+        /** FIXME: Add check 'is MathML math element' */
+        return false;
+    }
+
+    /** FIXME: Add check 'This is not a dialog element' */
+
+    // The fullscreen element ready check for this returns true.
+    if (!element.element_ready_check()) {
+        return false;
+    }
+    /** FIXME: Add check for 'Fullscreen is supported.' */
+    /** FIXME: Add check for 'This’s relevant global object has transient activation or the algorithm is triggered by a user generated orientation change.' */
+
+    return true;
+}
+
+// https://fullscreen.spec.whatwg.org/#fullscreen-element-ready-check
+bool Element::element_ready_check() const
+{
+    // element is connected.
+    if (!is_connected()) {
+      return false;
+    }
+    // element’s node document is allowed to use the "fullscreen" feature.
+    if(!m_document->is_allowed_to_use_feature(PolicyControlledFeature::Fullscreen)) {
+        return false;
+    }
+
+    /** FIXME: add check for 'element namespace is not the HTML namespace or element’s popover visibility state is hidden.' */
+    return true;
+}
+
+// https://fullscreen.spec.whatwg.org/#dom-element-requestfullscreen
+GC::Ref<WebIDL::Promise> Element::request_fullscreen()
+{
+    // 1. Let pendingDoc be this’s node document.
+    auto pending_doc = m_document;
+
+    auto* realm = vm().current_realm();
+    // 2. Let promise be a new promise.
+    auto promise = WebIDL::create_promise(*realm);
+
+    // 3. If pendingDoc is not fully active, then reject promise with a TypeError exception and return promise.
+    if (!pending_doc->is_fully_active()) {
+        WebIDL::reject_promise(*realm, promise, WebIDL::SyntaxError::create(*realm, "FOO BAR THIS IS NOT RIGHT, BUT UNINTERESTING FOR NOW"_string));
+        return promise;
+    }
+
+    // 4. Let error be false.
+    // 5. If any of conditions are false, set error to true
+    bool error = !check_fullscreen_conditions(*this);
+
+    // 6. If error is false, then consume user activation given pendingDoc’s relevant global object.
+    if (!error) {
+        auto& relevant_global = as<HTML::Window>(relevant_global_object(*pending_doc));
+        relevant_global.consume_user_activation();
+    }
+
+    m_document->page().client().page_did_request_fullscreen_window();
+
+    // 7. Return promise, and run the remaining steps in parallel.
+    Platform::EventLoopPlugin::the().deferred_invoke(GC::create_function(realm->heap(), [realm, err=error, pending_doc, element = GC::Ref<Element> {*this}, promise]() {
+        HTML::TemporaryExecutionContext context(*realm, HTML::TemporaryExecutionContext::CallbacksEnabled::Yes);
+        bool error = err;
+        // 8. If error is false, then resize pendingDoc’s node navigable’s top-level traversable’s
+        // active document’s viewport’s dimensions, optionally taking into account options["navigationUI"]:
+
+        // 9. If any of the following conditions are false, then set error to true:
+        //      This’s node document is pendingDoc.
+        //      The fullscreen element ready check for this returns true.
+        if (pending_doc != element->owner_document()) {
+            error = true;
+        }
+
+        // 10. If error is true:
+        //      Append (fullscreenerror, this) to pendingDoc’s list of pending fullscreen events.
+        //      Reject promise with a TypeError exception and terminate these steps.
+        if (error) {
+            pending_doc->append_pending_fullscreen_change(PendingFullscreenEvent::Type::Error, element);
+            WebIDL::reject_promise(*realm, promise, WebIDL::SyntaxError::create(*realm, "FOO BAR THIS IS NOT RIGHT, BUT UNINTERESTING FOR NOW"_string));
+            return;
+        }
+
+        // 11. Let fullscreenElements be an ordered set initially consisting of this.
+        Vector<GC::Ref<Element>> fullscreen_elements;
+
+        fullscreen_elements.append(element);
+        // 12. While true:
+        //      1. Let last be the last item of fullscreenElements.
+        //      2. Let container be last’s node navigable’s container.
+        //      3. If container is null, then break.
+        //      4. Append container to fullscreenElements.
+        for(auto last = fullscreen_elements.last();; last = fullscreen_elements.last()) {
+            auto container = last->navigable()->container();
+            if (!container) {
+                break;
+            }
+            fullscreen_elements.append(*container);
+        }
+
+        // 13. For each element in fullscreenElements:
+        for (GC::Ref<Element>& el : fullscreen_elements) {
+            // 1. Let doc be element’s node document.
+            Document& doc = el->document();
+            // 2. If element is doc’s fullscreen element, continue.
+            if (doc.fullscreen_element() == el) {
+                // Spec note: No need to notify observers when nothing has changed.
+                continue;
+            }
+            // 4. If element is this and this is an iframe element, then set element’s iframe fullscreen flag.
+            if (el == element && element->is_html_iframe_element()) {
+                // FIXME: set iframe fullscreen flag
+                auto& iframe_element = static_cast<HTML::HTMLIFrameElement&>(*el);
+                iframe_element.set_iframe_fullscreen_flag();
+            }
+            // 5. Fullscreen element within doc.
+            doc.fullscreen_element_within_doc(el);
+            // 6. Append (fullscreenchange, element) to doc’s list of pending fullscreen events.
+            doc.append_pending_fullscreen_change(PendingFullscreenEvent::Type::Change, el);
+        }
+
+        // 14. Resolve promise with undefined
+        WebIDL::resolve_promise(*realm, promise, JS::js_undefined());
+    }));
+
+    return promise;
 }
 
 GC::Ptr<WebIDL::CallbackType> Element::onfullscreenchange() {

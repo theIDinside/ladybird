@@ -39,6 +39,7 @@
 #include <QPoint>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <qnamespace.h>
 
 namespace Ladybird {
 
@@ -377,7 +378,9 @@ Tab::Tab(BrowserWindow* window, RefPtr<WebView::WebContentClient> parent_client,
     };
 
     view().on_fullscreen_window = [this]() {
-        m_window->showFullScreen();
+        // m_window->setWindowFlags(Qt::FramelessWindowHint & Qt::MaximizeUsingFullscreenGeometryHint);
+        BrowserWindow* window = static_cast<BrowserWindow*>(m_window);
+        window->showFullScreen();
         view().did_update_window_rect();
     };
 
@@ -889,6 +892,13 @@ void Tab::update_navigation_buttons_state()
 
 bool Tab::event(QEvent* event)
 {
+    switch (event->type()) {
+    case QEvent::WindowStateChange:
+        dbgln("Tab::event(QEvent::WindowStateChange={})", (u64)windowState());
+        break;
+    default:
+        break;
+    }
     if (event->type() == QEvent::PaletteChange) {
         recreate_toolbar_icons();
         return QWidget::event(event);
