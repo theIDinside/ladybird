@@ -159,6 +159,14 @@ enum class PolicyControlledFeature : u8 {
     FocusWithoutUserActivation,
 };
 
+struct PendingFullscreenEvent {
+    enum class Type {
+        Change,
+        Error,
+    } m_type;
+    GC::Ref<Element> m_element;
+};
+
 class Document
     : public ParentNode
     , public NonElementParentNode<Document>
@@ -898,6 +906,10 @@ public:
         m_pending_nodes_for_style_invalidation_due_to_presence_of_has.set(node.make_weak_ptr<Node>());
     }
 
+    // https://fullscreen.spec.whatwg.org/#run-the-fullscreen-steps
+    void run_fullscreen_steps();
+    void append_pending_fullscreen_change(PendingFullscreenEvent::Type type, GC::Ref<Element> element);
+
 protected:
     virtual void initialize(JS::Realm&) override;
     virtual void visit_edges(Cell::Visitor&) override;
@@ -1249,6 +1261,8 @@ private:
     HashTable<GC::Ref<Element>> m_render_blocking_elements;
 
     HashTable<WeakPtr<Node>> m_pending_nodes_for_style_invalidation_due_to_presence_of_has;
+    // https://fullscreen.spec.whatwg.org/#list-of-pending-fullscreen-events
+    Vector<PendingFullscreenEvent> m_pending_fullscreen_events;
 };
 
 template<>
